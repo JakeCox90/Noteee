@@ -27,7 +27,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "id and status are required" });
   }
 
-  const validStatuses = ["To Do", "In Progress", "Done"];
+  const validStatuses = ["To Do", "In Progress", "Done", "Archived"];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ error: `status must be one of: ${validStatuses.join(", ")}` });
   }
@@ -59,7 +59,7 @@ async function handleGet(req, res) {
           property: "Status",
           select: { does_not_equal: "Archived" },
         },
-        sorts: [{ property: "Created", direction: "descending" }],
+        sorts: [{ timestamp: "created_time", direction: "descending" }],
       }),
       notion.databases.query({
         database_id: PROJECTS_DB_ID,
