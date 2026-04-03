@@ -1,0 +1,19 @@
+{
+  "name": "noteee",
+  "version": "1.0.0",
+  "description": "Voice-to-action project management system powered by Claude and Notion",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "seed": "node scripts/seed.js",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.20.0",
+    "@notionhq/client": "^2.2.14",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "vercel": "^33.0.0"
+  }
+}
