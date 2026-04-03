@@ -21,9 +21,11 @@ final class VoiceRecorderService {
 
     /// Configures the audio session and starts the AVAudioEngine recording to a temp m4a file.
     func startRecording() throws {
+#if os(iOS)
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .default)
-        try session.setActive(true)
+        try session.setActive(true, options: [])
+#endif
 
         let url = makeTemporaryURL()
         outputURL = url
@@ -65,7 +67,9 @@ final class VoiceRecorderService {
         audioFile = nil
         isRecording = false
 
-        try? AVAudioSession.sharedInstance().setActive(false)
+#if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: [])
+#endif
 
         return outputURL
     }
