@@ -48,13 +48,14 @@ Confident match — return JSON:
 Not confident — return JSON:
 {"confident":false,"question":"...","options":["Project A","Project B"]}
 
+Return ONLY the JSON object. No other text.
+
 Voice note: "${transcription}"`,
       },
     ],
   });
 
-  const text = response.content[0].text;
-  return JSON.parse(text.replace(/```json|```/g, "").trim());
+  return parseJSON(response.content[0].text);
 }
 
 // Extract only: used when project is already confirmed
@@ -69,7 +70,7 @@ async function extractActions(transcription, projectName) {
 
 Rules: verb-first, specific, one action per item. Assign priority: high, medium, or low.
 
-Return JSON only:
+Return ONLY this JSON object, no other text:
 {"actions":[{"title":"...","priority":"high|medium|low"}],"notes":"..."}
 
 Voice note: "${transcription}"`,
@@ -77,8 +78,25 @@ Voice note: "${transcription}"`,
     ],
   });
 
-  const text = response.content[0].text;
-  return JSON.parse(text.replace(/```json|```/g, "").trim());
+  return parseJSON(response.content[0].text);
+}
+
+// Robust JSON extraction — handles markdown fences and trailing text
+function parseJSON(text) {
+  let clean = text.replace(/```json|```/g, "").trim();
+  // Extract the first complete JSON object
+  const start = clean.indexOf("{");
+  if (start === -1) throw new Error("No JSON found in response");
+  let depth = 0;
+  for (let i = start; i < clean.length; i++) {
+    if (clean[i] === "{") depth++;
+    else if (clean[i] === "}") depth--;
+    if (depth === 0) {
+      return JSON.parse(clean.slice(start, i + 1));
+    }
+  }
+  // Fallback
+  return JSON.parse(clean);
 }
 
 // Write inbox + actions in parallel
