@@ -55,10 +55,6 @@ async function handleGet(req, res) {
     const [actionsRes, projectsRes] = await Promise.all([
       notion.databases.query({
         database_id: ACTIONS_DB_ID,
-        filter: {
-          property: "Status",
-          select: { does_not_equal: "Archived" },
-        },
         sorts: [{ timestamp: "created_time", direction: "descending" }],
       }),
       notion.databases.query({
