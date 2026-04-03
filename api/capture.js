@@ -48,6 +48,8 @@ Confident match — return JSON:
 Not confident — return JSON:
 {"confident":false,"question":"...","options":["Project A","Project B"]}
 
+IMPORTANT: "options" must contain EXACT project names from the list above. No descriptions, no extra text — just the project name as written.
+
 Return ONLY the JSON object. No other text.
 
 Voice note: "${transcription}"`,
