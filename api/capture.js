@@ -153,13 +153,18 @@ export default async function handler(req, res) {
       }
 
       const result = await processWithClaude(transcription, projects);
+      // Force the project match — Claude may still return confident:false
+      result.project_name = project.name;
+      const actions = result.actions || [];
       await writeToInbox(transcription, result, project.id);
-      await writeActions(result.actions, project.id);
+      if (actions.length > 0) {
+        await writeActions(actions, project.id);
+      }
 
       return res.status(200).json({
         success: true,
         project: project.name,
-        actions: result.actions,
+        actions,
       });
     }
 
@@ -186,13 +191,16 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: "Matched project not found in Notion" });
     }
 
+    const actions = result.actions || [];
     await writeToInbox(transcription, result, project.id);
-    await writeActions(result.actions, project.id);
+    if (actions.length > 0) {
+      await writeActions(actions, project.id);
+    }
 
     return res.status(200).json({
       success: true,
       project: result.project_name,
-      actions: result.actions,
+      actions,
     });
   } catch (err) {
     console.error("Error processing note:", err);
