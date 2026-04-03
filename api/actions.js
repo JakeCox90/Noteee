@@ -21,28 +21,47 @@ export default async function handler(req, res) {
     try { body = JSON.parse(body); } catch (e) { body = {}; }
   }
 
-  const { id, status } = body;
+  const { id, status, title, description, priority, projectId } = body;
 
-  if (!id || !status) {
-    return res.status(400).json({ error: "id and status are required" });
+  if (!id) {
+    return res.status(400).json({ error: "id is required" });
   }
 
   const validStatuses = ["To Do", "In Progress", "Done", "Archived"];
-  if (!validStatuses.includes(status)) {
+  if (status && !validStatuses.includes(status)) {
     return res.status(400).json({ error: `status must be one of: ${validStatuses.join(", ")}` });
   }
 
+  const validPriorities = ["high", "medium", "low"];
+  if (priority && !validPriorities.includes(priority.toLowerCase())) {
+    return res.status(400).json({ error: `priority must be one of: ${validPriorities.join(", ")}` });
+  }
+
   try {
+    const properties = {};
+
+    if (status) {
+      properties.Status = { select: { name: status } };
+    }
+    if (title !== undefined) {
+      properties.Name = { title: [{ text: { content: title } }] };
+    }
+    if (description !== undefined) {
+      properties.Description = { rich_text: [{ text: { content: description } }] };
+    }
+    if (priority) {
+      properties.Priority = { select: { name: priority.toLowerCase() } };
+    }
+    if (projectId !== undefined) {
+      properties.Project = { relation: projectId ? [{ id: projectId }] : [] };
+    }
+
     await notion.pages.update({
       page_id: id,
-      properties: {
-        Status: {
-          select: { name: status },
-        },
-      },
+      properties,
     });
 
-    return res.status(200).json({ success: true, id, status });
+    return res.status(200).json({ success: true, id });
   } catch (err) {
     console.error("Error updating action:", err);
     return res.status(500).json({ error: "Failed to update action", detail: err.message });
@@ -74,8 +93,10 @@ async function handleGet(req, res) {
       return {
         id: page.id,
         title: props.Name?.title?.[0]?.plain_text || "",
+        description: props.Description?.rich_text?.[0]?.plain_text || "",
         priority: props.Priority?.select?.name || "medium",
         status: props.Status?.select?.name || "To Do",
+        projectId: projectRelation || "",
         projectName: projectRelation ? (projectMap[projectRelation] || "") : "",
         createdAt: page.created_time,
       };

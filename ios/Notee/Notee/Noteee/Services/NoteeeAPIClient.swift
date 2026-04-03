@@ -161,6 +161,11 @@ final class NoteeeAPIClient {
 
     /// PATCH /api/actions — update an action's status.
     func updateActionStatus(id: String, status: String) async throws {
+        try await updateAction(id: id, fields: ["status": status])
+    }
+
+    /// PATCH /api/actions — update any combination of action fields.
+    func updateAction(id: String, fields: [String: String]) async throws {
         guard let url = URL(string: "\(Self.baseURL)/api/actions") else {
             throw APIError.invalidURL
         }
@@ -169,7 +174,8 @@ final class NoteeeAPIClient {
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let body = ["id": id, "status": status]
+        var body = fields
+        body["id"] = id
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await session.data(for: request)

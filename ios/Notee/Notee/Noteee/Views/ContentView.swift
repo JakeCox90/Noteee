@@ -12,15 +12,28 @@ struct ContentView: View {
         viewModel.state == .recording || viewModel.state == .transcribing || viewModel.state == .submitting
     }
 
+    private var showOverlay: Bool {
+        viewModel.state == .transcribing || viewModel.state == .submitting
+            || viewModel.state == .success || viewModel.state == .error
+    }
+
     var body: some View {
         ZStack {
             // Home view — always present as base
             HomeView(viewModel: viewModel)
-                .opacity(isRecordingFlow || showingPicker ? 0 : 1)
+                .blur(radius: showOverlay || showingPicker ? 8 : 0)
+                .opacity(showingPicker ? 0 : 1)
                 .offset(y: showingPicker ? -200 : 0)
 
-            // Recording overlay — mic button, transcribing, submitting states
-            if isRecordingFlow {
+            // Scrim for overlay states
+            if showOverlay {
+                Color.black.opacity(0.08)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+            }
+
+            // Recording overlay — transcribing, submitting states
+            if viewModel.state == .transcribing || viewModel.state == .submitting {
                 MicView(viewModel: viewModel)
                     .transition(.opacity)
             }

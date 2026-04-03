@@ -18,8 +18,10 @@ struct Action: Codable, Identifiable {
 struct NotionAction: Codable, Identifiable {
     let id: String
     let title: String
+    let description: String?
     let priority: String
     let status: String
+    let projectId: String?
     let projectName: String
     let createdAt: String
 }
