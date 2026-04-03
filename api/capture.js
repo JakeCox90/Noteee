@@ -8,7 +8,6 @@ const PROJECTS_DB_ID = process.env.NOTION_PROJECTS_DB_ID;
 const INBOX_DB_ID = process.env.NOTION_INBOX_DB_ID;
 const ACTIONS_DB_ID = process.env.NOTION_ACTIONS_DB_ID;
 
-// Fetch all projects from Notion so Claude knows what to route to
 async function getProjects() {
   const response = await notion.databases.query({
     database_id: PROJECTS_DB_ID,
@@ -22,112 +21,105 @@ async function getProjects() {
   }));
 }
 
-// Send transcription + project context to Claude
-async function processWithClaude(transcription, projects) {
+// Route + extract: used on first pass when project is unknown
+async function routeAndExtract(transcription, projects) {
   const projectList = projects
     .map((p) => `- ${p.name}: ${p.description}`)
     .join("\n");
 
   const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-haiku-4-5-20251001",
     max_tokens: 1000,
     messages: [
       {
         role: "user",
-        content: `You are an action extraction and organisation system for a personal project management tool.
+        content: `You are an action extraction system for a personal project tool.
 
-The user has the following active projects:
+Active projects:
 ${projectList}
 
-Your job is to:
-1. Match the note to the most relevant project based on content and project descriptions
-2. Extract concrete, actionable to-do items
-3. Normalise all to-dos so they are consistent, specific, and actionable (start with a verb, include enough context to act on)
-4. Assign a priority: high, medium, or low
-5. If you are confident about the project match (>80%), return it. If not, return a clarification question.
+1. Match the note to the best project (>80% confidence) or ask for clarification.
+2. Extract concrete actions (verb-first, specific, one per item).
+3. Assign priority: high, medium, or low.
 
-Always return valid JSON in this exact format:
-{
-  "confident": true,
-  "project_name": "Project Name Here",
-  "actions": [
-    { "title": "Normalised action title", "priority": "high|medium|low" }
-  ],
-  "notes": "Any supporting context from the note that isn't an action"
-}
+Confident match — return JSON:
+{"confident":true,"project_name":"...","actions":[{"title":"...","priority":"high|medium|low"}],"notes":"..."}
 
-If not confident, return:
-{
-  "confident": false,
-  "question": "Was that note for [Project A] or [Project B]?",
-  "options": ["Project A", "Project B"]
-}
+Not confident — return JSON:
+{"confident":false,"question":"...","options":["Project A","Project B"]}
 
-User's voice note:
-"${transcription}"`,
+Voice note: "${transcription}"`,
       },
     ],
   });
 
   const text = response.content[0].text;
-  const clean = text.replace(/```json|```/g, "").trim();
-  return JSON.parse(clean);
+  return JSON.parse(text.replace(/```json|```/g, "").trim());
 }
 
-// Write to Notion Inbox
-async function writeToInbox(transcription, result, projectId) {
-  await notion.pages.create({
-    parent: { database_id: INBOX_DB_ID },
-    properties: {
-      Name: {
-        title: [{ text: { content: transcription.slice(0, 100) } }],
+// Extract only: used when project is already confirmed
+async function extractActions(transcription, projectName) {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 1000,
+    messages: [
+      {
+        role: "user",
+        content: `Extract concrete actions from this voice note. The project is "${projectName}".
+
+Rules: verb-first, specific, one action per item. Assign priority: high, medium, or low.
+
+Return JSON only:
+{"actions":[{"title":"...","priority":"high|medium|low"}],"notes":"..."}
+
+Voice note: "${transcription}"`,
       },
-      "Raw Transcription": {
-        rich_text: [{ text: { content: transcription } }],
-      },
-      Project: {
-        relation: [{ id: projectId }],
-      },
-      Notes: {
-        rich_text: [{ text: { content: result.notes || "" } }],
-      },
-      Status: {
-        select: { name: "Processed" },
-      },
-    },
+    ],
   });
+
+  const text = response.content[0].text;
+  return JSON.parse(text.replace(/```json|```/g, "").trim());
 }
 
-// Write extracted actions to Notion Actions table
-async function writeActions(actions, projectId) {
-  for (const action of actions) {
-    await notion.pages.create({
-      parent: { database_id: ACTIONS_DB_ID },
+// Write inbox + actions in parallel
+async function writeToNotion(transcription, result, projectId) {
+  const actions = result.actions || [];
+
+  const writes = [
+    // Inbox record
+    notion.pages.create({
+      parent: { database_id: INBOX_DB_ID },
       properties: {
-        Name: {
-          title: [{ text: { content: action.title } }],
-        },
-        Project: {
-          relation: [{ id: projectId }],
-        },
-        Priority: {
-          select: { name: action.priority },
-        },
-        Status: {
-          select: { name: "To Do" },
-        },
+        Name: { title: [{ text: { content: transcription.slice(0, 100) } }] },
+        "Raw Transcription": { rich_text: [{ text: { content: transcription } }] },
+        Project: { relation: [{ id: projectId }] },
+        Notes: { rich_text: [{ text: { content: result.notes || "" } }] },
+        Status: { select: { name: "Processed" } },
       },
-    });
-  }
+    }),
+    // All action records
+    ...actions.map((action) =>
+      notion.pages.create({
+        parent: { database_id: ACTIONS_DB_ID },
+        properties: {
+          Name: { title: [{ text: { content: action.title } }] },
+          Project: { relation: [{ id: projectId }] },
+          Priority: { select: { name: action.priority } },
+          Status: { select: { name: "To Do" } },
+        },
+      })
+    ),
+  ];
+
+  await Promise.all(writes);
+  return actions;
 }
 
-// Main handler
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Parse body - handle string, form-encoded, or JSON
   let body = req.body;
   if (typeof body === "string") {
     try { body = JSON.parse(body); } catch (e) { body = {}; }
@@ -143,7 +135,7 @@ export default async function handler(req, res) {
   try {
     const projects = await getProjects();
 
-    // If user has confirmed a project after a clarification prompt
+    // Confirmed project — skip routing, just extract actions
     if (confirmed_project) {
       const project = projects.find(
         (p) => p.name.toLowerCase() === confirmed_project.toLowerCase()
@@ -152,56 +144,34 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: "Project not found" });
       }
 
-      const result = await processWithClaude(transcription, projects);
-      // Force the project match — Claude may still return confident:false
-      result.project_name = project.name;
-      const actions = result.actions || [];
-      await writeToInbox(transcription, result, project.id);
-      if (actions.length > 0) {
-        await writeActions(actions, project.id);
-      }
+      const result = await extractActions(transcription, project.name);
+      const actions = await writeToNotion(transcription, result, project.id);
 
-      return res.status(200).json({
-        success: true,
-        project: project.name,
-        actions,
-      });
+      return res.status(200).json({ success: true, project: project.name, actions });
     }
 
-    // First pass — let Claude decide
-    const result = await processWithClaude(transcription, projects);
+    // First pass — route and extract
+    const result = await routeAndExtract(transcription, projects);
 
     if (!result.confident) {
-      // Ask the user to clarify
       return res.status(200).json({
         success: false,
         needs_clarification: true,
         question: result.question,
         options: result.options,
-        transcription, // pass back so Shortcut can resend with confirmed project
+        transcription,
       });
     }
 
-    // Claude is confident — find the project and write everything
     const project = projects.find(
       (p) => p.name.toLowerCase() === result.project_name.toLowerCase()
     );
-
     if (!project) {
       return res.status(404).json({ error: "Matched project not found in Notion" });
     }
 
-    const actions = result.actions || [];
-    await writeToInbox(transcription, result, project.id);
-    if (actions.length > 0) {
-      await writeActions(actions, project.id);
-    }
-
-    return res.status(200).json({
-      success: true,
-      project: result.project_name,
-      actions,
-    });
+    const actions = await writeToNotion(transcription, result, project.id);
+    return res.status(200).json({ success: true, project: result.project_name, actions });
   } catch (err) {
     console.error("Error processing note:", err);
     return res.status(500).json({ error: "Failed to process note", detail: err.message });
