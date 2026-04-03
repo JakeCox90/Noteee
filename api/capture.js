@@ -127,10 +127,17 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { transcription, confirmed_project } = req.body;
+  // Parse body - handle string, form-encoded, or JSON
+  let body = req.body;
+  if (typeof body === "string") {
+    try { body = JSON.parse(body); } catch (e) { body = {}; }
+  }
+
+  const transcription = body.transcription || body.Transcription;
+  const confirmed_project = body.confirmed_project || body.Confirmed_project;
 
   if (!transcription) {
-    return res.status(400).json({ error: "No transcription provided" });
+    return res.status(400).json({ error: "No transcription provided", received: body });
   }
 
   try {

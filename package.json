@@ -9,7 +9,7 @@
     "deploy": "vercel --prod"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.20.0",
+    "@anthropic-ai/sdk": "^0.39.0",
     "@notionhq/client": "^2.2.14",
     "dotenv": "^16.4.5"
   },
