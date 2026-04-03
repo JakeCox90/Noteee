@@ -101,38 +101,40 @@ function parseJSON(text) {
   return JSON.parse(clean);
 }
 
-// Write inbox + actions in parallel
+// Write inbox + actions in parallel, return actions with Notion IDs
 async function writeToNotion(transcription, result, projectId) {
   const actions = result.actions || [];
 
-  const writes = [
-    // Inbox record
-    notion.pages.create({
-      parent: { database_id: INBOX_DB_ID },
-      properties: {
-        Name: { title: [{ text: { content: transcription.slice(0, 100) } }] },
-        "Raw Transcription": { rich_text: [{ text: { content: transcription } }] },
-        Project: { relation: [{ id: projectId }] },
-        Notes: { rich_text: [{ text: { content: result.notes || "" } }] },
-        Status: { select: { name: "Processed" } },
-      },
-    }),
-    // All action records
-    ...actions.map((action) =>
-      notion.pages.create({
-        parent: { database_id: ACTIONS_DB_ID },
-        properties: {
-          Name: { title: [{ text: { content: action.title } }] },
-          Project: { relation: [{ id: projectId }] },
-          Priority: { select: { name: action.priority } },
-          Status: { select: { name: "To Do" } },
-        },
-      })
-    ),
-  ];
+  const inboxWrite = notion.pages.create({
+    parent: { database_id: INBOX_DB_ID },
+    properties: {
+      Name: { title: [{ text: { content: transcription.slice(0, 100) } }] },
+      "Raw Transcription": { rich_text: [{ text: { content: transcription } }] },
+      Project: { relation: [{ id: projectId }] },
+      Notes: { rich_text: [{ text: { content: result.notes || "" } }] },
+      Status: { select: { name: "Processed" } },
+    },
+  });
 
-  await Promise.all(writes);
-  return actions;
+  const actionWrites = actions.map((action) =>
+    notion.pages.create({
+      parent: { database_id: ACTIONS_DB_ID },
+      properties: {
+        Name: { title: [{ text: { content: action.title } }] },
+        Project: { relation: [{ id: projectId }] },
+        Priority: { select: { name: action.priority } },
+        Status: { select: { name: "To Do" } },
+      },
+    })
+  );
+
+  const [, ...actionPages] = await Promise.all([inboxWrite, ...actionWrites]);
+
+  // Return actions enriched with their Notion page IDs
+  return actions.map((action, i) => ({
+    ...action,
+    id: actionPages[i]?.id || null,
+  }));
 }
 
 export default async function handler(req, res) {

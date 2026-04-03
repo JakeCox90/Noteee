@@ -1,7 +1,25 @@
 import Foundation
 
+/// Action returned from capture — includes Notion page ID when available
 struct Action: Codable, Identifiable {
-    var id: String { title }
+    var id: String { notionId ?? title }
+    let notionId: String?
     let title: String
     let priority: String
+
+    enum CodingKeys: String, CodingKey {
+        case notionId = "id"
+        case title
+        case priority
+    }
+}
+
+/// Full action fetched from Notion with all metadata
+struct NotionAction: Codable, Identifiable {
+    let id: String
+    let title: String
+    let priority: String
+    let status: String
+    let projectName: String
+    let createdAt: String
 }

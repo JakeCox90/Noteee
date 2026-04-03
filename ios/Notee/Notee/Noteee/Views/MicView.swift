@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MicView: View {
 
-    @State var viewModel: CaptureViewModel
+    var viewModel: CaptureViewModel
 
     var body: some View {
         VStack(spacing: 32) {
@@ -25,25 +25,6 @@ struct MicView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
-            // Loading indicators
-            if viewModel.state == .transcribing {
-                VStack(spacing: 8) {
-                    ProgressView()
-                        .scaleEffect(1.3)
-                    Text("Transcribing…")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            } else if viewModel.state == .submitting {
-                VStack(spacing: 8) {
-                    ProgressView()
-                        .scaleEffect(1.3)
-                    Text("Submitting…")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
             // Duration indicator during recording
             if viewModel.state == .recording {
                 Text(formattedDuration(viewModel.recordingDuration))
@@ -51,8 +32,14 @@ struct MicView: View {
                     .foregroundStyle(.red)
             }
 
-            // Mic button
-            Button(action: { viewModel.toggleRecording() }) {
+            // Mic / cancel button
+            Button(action: {
+                if viewModel.state == .transcribing || viewModel.state == .submitting {
+                    viewModel.cancelTranscription()
+                } else {
+                    viewModel.toggleRecording()
+                }
+            }) {
                 ZStack {
                     Circle()
                         .fill(micButtonColor)
@@ -66,10 +53,14 @@ struct MicView: View {
             }
             .buttonStyle(.plain)
             .scaleEffect(viewModel.state == .recording ? 1.1 : 1.0)
-            .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true),
-                       value: viewModel.state == .recording)
-            .disabled(viewModel.state == .transcribing || viewModel.state == .submitting)
-            .accessibilityLabel(viewModel.state == .recording ? "Stop recording" : "Start recording")
+            .animation(
+                viewModel.state == .recording
+                    ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true)
+                    : .default,
+                value: viewModel.state == .recording
+            )
+            .disabled(false)
+            .accessibilityLabel(micAccessibilityLabel)
 
             Text(micButtonLabel)
                 .font(.subheadline)
@@ -88,7 +79,9 @@ struct MicView: View {
         switch viewModel.state {
         case .recording:
             return .red
-        case .transcribing, .submitting:
+        case .transcribing:
+            return .gray
+        case .submitting:
             return .gray
         default:
             return .blue
@@ -100,7 +93,7 @@ struct MicView: View {
         case .recording:
             return "stop.fill"
         case .transcribing, .submitting:
-            return "mic"
+            return "xmark"
         default:
             return "mic.fill"
         }
@@ -118,6 +111,17 @@ struct MicView: View {
             return "Submitting…"
         default:
             return ""
+        }
+    }
+
+    private var micAccessibilityLabel: String {
+        switch viewModel.state {
+        case .recording:
+            return "Stop recording"
+        case .transcribing, .submitting:
+            return "Cancel"
+        default:
+            return "Start recording"
         }
     }
 

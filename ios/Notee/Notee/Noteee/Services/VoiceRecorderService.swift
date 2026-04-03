@@ -11,15 +11,14 @@ final class VoiceRecorderService {
 
     // MARK: - Private
 
-    private let audioEngine = AVAudioEngine()
-    private var audioFile: AVAudioFile?
+    private var audioRecorder: AVAudioRecorder?
     private var outputURL: URL?
     private var durationTimer: Timer?
     private let maxDuration: TimeInterval = 60
 
     // MARK: - Recording Control
 
-    /// Configures the audio session and starts the AVAudioEngine recording to a temp m4a file.
+    /// Configures the audio session and starts recording to a WAV file.
     func startRecording() throws {
 #if os(iOS)
         let session = AVAudioSession.sharedInstance()
@@ -30,18 +29,17 @@ final class VoiceRecorderService {
         let url = makeTemporaryURL()
         outputURL = url
 
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatLinearPCM),
+            AVSampleRateKey: 16000.0,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+        ]
 
-        audioFile = try AVAudioFile(forWriting: url, settings: format.settings)
-
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            guard let self, let file = self.audioFile else { return }
-            try? file.write(from: buffer)
-        }
-
-        audioEngine.prepare()
-        try audioEngine.start()
+        audioRecorder = try AVAudioRecorder(url: url, settings: settings)
+        audioRecorder?.record()
 
         isRecording = true
         recordingDuration = 0
@@ -55,16 +53,14 @@ final class VoiceRecorderService {
         }
     }
 
-    /// Stops the engine and returns the URL of the recorded audio file.
+    /// Stops recording and returns the URL of the recorded audio file.
     @discardableResult
     func stopRecording() -> URL? {
         durationTimer?.invalidate()
         durationTimer = nil
 
-        audioEngine.inputNode.removeTap(onBus: 0)
-        audioEngine.stop()
-
-        audioFile = nil
+        audioRecorder?.stop()
+        audioRecorder = nil
         isRecording = false
 
 #if os(iOS)
@@ -77,7 +73,7 @@ final class VoiceRecorderService {
     // MARK: - Helpers
 
     private func makeTemporaryURL() -> URL {
-        let filename = "noteee_recording_\(UUID().uuidString).m4a"
+        let filename = "noteee_recording_\(UUID().uuidString).wav"
         return FileManager.default.temporaryDirectory.appendingPathComponent(filename)
     }
 }

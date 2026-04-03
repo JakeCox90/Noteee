@@ -2,7 +2,7 @@ import SwiftUI
 
 struct NewProjectSheetView: View {
 
-    @State var viewModel: CaptureViewModel
+    var viewModel: CaptureViewModel
     @State private var projectName: String = ""
     @Environment(\.dismiss) private var dismiss
 

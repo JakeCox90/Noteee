@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ErrorView: View {
 
-    @State var viewModel: CaptureViewModel
+    var viewModel: CaptureViewModel
 
     var body: some View {
         VStack(spacing: 32) {

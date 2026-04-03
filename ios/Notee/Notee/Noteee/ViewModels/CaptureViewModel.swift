@@ -38,6 +38,8 @@ final class CaptureViewModel {
 
     private let recorder = VoiceRecorderService()
     private let api: NoteeeAPIClient
+    private var transcriptionTask: Task<Void, Never>?
+    private var submissionTask: Task<Void, Never>?
 
     var isRecording: Bool { recorder.isRecording }
     var recordingDuration: TimeInterval { recorder.recordingDuration }
@@ -97,9 +99,18 @@ final class CaptureViewModel {
         }
         state = .transcribing
 
-        Task {
+        transcriptionTask = Task {
             await transcribeAndCapture(audioURL: audioURL)
         }
+    }
+
+    /// Cancels an in-progress transcription or submission and returns to idle.
+    func cancelTranscription() {
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        submissionTask?.cancel()
+        submissionTask = nil
+        reset()
     }
 
     // MARK: - Submission
@@ -107,6 +118,7 @@ final class CaptureViewModel {
     private func transcribeAndCapture(audioURL: URL) async {
         do {
             let text = try await api.transcribe(audioURL: audioURL)
+            guard !Task.isCancelled else { return }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 setError("Couldn't transcribe — please try again.")
                 return
@@ -115,6 +127,7 @@ final class CaptureViewModel {
             originalTranscription = text
             await submit(transcription: text)
         } catch {
+            guard !Task.isCancelled else { return }
             setError(error.localizedDescription)
         }
     }
@@ -144,6 +157,7 @@ final class CaptureViewModel {
         state = .submitting
         do {
             let response = try await api.capture(transcription: transcription, confirmedProject: confirmedProject)
+            guard !Task.isCancelled else { return }
 
             if response.success == true {
                 matchedProject = response.project ?? ""
@@ -158,6 +172,7 @@ final class CaptureViewModel {
                 setError(message)
             }
         } catch {
+            guard !Task.isCancelled else { return }
             setError(error.localizedDescription)
         }
     }
@@ -167,7 +182,7 @@ final class CaptureViewModel {
     /// Re-submits with the user-confirmed project name.
     func confirmProject(_ name: String) {
         state = .submitting
-        Task {
+        submissionTask = Task {
             await submit(transcription: originalTranscription, confirmedProject: name)
         }
     }

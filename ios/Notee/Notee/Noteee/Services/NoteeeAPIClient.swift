@@ -57,9 +57,10 @@ final class NoteeeAPIClient {
         let filename = audioURL.lastPathComponent
 
         var body = Data()
+        let mimeType = filename.hasSuffix(".wav") ? "audio/wav" : "audio/m4a"
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"audio\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
         body.append(audioData)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
 
@@ -134,6 +135,45 @@ final class NoteeeAPIClient {
 
         let data = try await post(url: url, body: body)
         return try decode(Project.self, from: data)
+    }
+
+    // MARK: - Actions
+
+    /// GET /api/actions — fetch all actions from Notion.
+    func getActions() async throws -> [NotionAction] {
+        guard let url = URL(string: "\(Self.baseURL)/api/actions") else {
+            throw APIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+
+        let (data, response) = try await session.data(for: request)
+        try validateHTTPResponse(response, data: data)
+
+        struct ActionsResponse: Decodable {
+            let actions: [NotionAction]
+        }
+
+        let decoded = try decode(ActionsResponse.self, from: data)
+        return decoded.actions
+    }
+
+    /// PATCH /api/actions — update an action's status.
+    func updateActionStatus(id: String, status: String) async throws {
+        guard let url = URL(string: "\(Self.baseURL)/api/actions") else {
+            throw APIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body = ["id": id, "status": status]
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: request)
+        try validateHTTPResponse(response, data: data)
     }
 
     // MARK: - Helpers
