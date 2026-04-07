@@ -9,12 +9,11 @@ struct ContentView: View {
     }
 
     private var isRecordingFlow: Bool {
-        viewModel.state == .recording || viewModel.state == .transcribing || viewModel.state == .submitting
+        viewModel.state == .recording || viewModel.state == .submitting
     }
 
     private var showOverlay: Bool {
-        viewModel.state == .transcribing || viewModel.state == .submitting
-            || viewModel.state == .success || viewModel.state == .error
+        viewModel.state == .error
     }
 
     var body: some View {
@@ -22,29 +21,12 @@ struct ContentView: View {
             // Home view — always present as base
             HomeView(viewModel: viewModel)
                 .blur(radius: showOverlay || showingPicker ? 8 : 0)
-                .opacity(showingPicker ? 0 : 1)
-                .offset(y: showingPicker ? -200 : 0)
 
             // Scrim for overlay states
-            if showOverlay {
+            if showOverlay || showingPicker {
                 Color.black.opacity(0.08)
                     .ignoresSafeArea()
                     .transition(.opacity)
-            }
-
-            // Recording overlay — transcribing, submitting states
-            if viewModel.state == .transcribing || viewModel.state == .submitting {
-                MicView(viewModel: viewModel)
-                    .transition(.opacity)
-            }
-
-            // Success view
-            if viewModel.state == .success {
-                SuccessView(viewModel: viewModel)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .bottom).combined(with: .opacity),
-                        removal: .opacity
-                    ))
             }
 
             // Error view
@@ -59,7 +41,9 @@ struct ContentView: View {
                     .transition(.move(edge: .bottom))
             }
         }
+        .preferredColorScheme(.light)
         .animation(.spring(response: 0.45, dampingFraction: 0.88), value: viewModel.state)
+        .onAppear { viewModel.prefetchToken() }
         .sheet(isPresented: Binding(
             get: { viewModel.state == .newProject },
             set: { if !$0 { viewModel.reset() } }

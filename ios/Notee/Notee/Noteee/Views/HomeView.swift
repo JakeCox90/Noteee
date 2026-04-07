@@ -361,7 +361,7 @@ struct HomeView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     headerTabs
-                        .padding(.top, 8)
+                        .padding(.top, 4)
 
                     // Project rail — All tab only, hidden when drilled into a project
                     if selectedTab == "All" && focusedProject == nil && !railProjects.isEmpty {
@@ -386,8 +386,8 @@ struct HomeView: View {
                                     }
                             }
                         )
-                        .padding(.top, 4)
-                        .padding(.bottom, 16)
+                        .padding(.top, -8)
+                        .padding(.bottom, 8)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
@@ -851,7 +851,8 @@ struct HomeView: View {
                     Spacer()
                 }
                 .padding(.horizontal, 24)
-                .padding(.vertical, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .transition(.opacity)
             }
@@ -2367,79 +2368,89 @@ struct HomeView: View {
     // MARK: - Typed Note Modal
 
     private var typedNoteOverlay: some View {
+        // The scrim covers the full screen (ignores safe area).
+        // The card container uses GeometryReader to read safeAreaInsets.bottom, which on iOS 17+
+        // automatically includes the keyboard height — no manual NotificationCenter tracking needed.
+        // The card is top-aligned; a Spacer at the bottom is padded by the safe area inset,
+        // ensuring the card never overlaps the keyboard.
         GeometryReader { geo in
-            let safeArea = geo.safeAreaInsets
-            let topPad: CGFloat = typedNoteDescriptionFocused ? safeArea.top + 20 : 160
-            let bottomStop = keyboardHeight > 0 ? keyboardHeight : safeArea.bottom
-            let availableHeight = geo.size.height - topPad - bottomStop - 20
-
             ZStack(alignment: .top) {
-                // Scrim — tap to dismiss
+                // Scrim — full screen, sits behind the card
                 Color.black.opacity(0.08)
                     .ignoresSafeArea()
                     .onTapGesture { dismissTypedNote() }
 
-                // Card with heading + description
-                VStack(alignment: .leading, spacing: 0) {
-                    // Heading field
-                    TextField("", text: $typedNoteText, prompt: Text("Heading").foregroundStyle(descriptionLabel), axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(textColor)
-                        .lineLimit(1...3)
-                        .focused($typedNoteFocused)
-                        .submitLabel(.next)
-                        .onChange(of: typedNoteText) { _, newValue in
-                            if newValue.contains("\n") {
-                                typedNoteText = newValue.replacingOccurrences(of: "\n", with: "")
-                                typedNoteDescriptionFocused = true
-                            }
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.top, 24)
-                        .padding(.bottom, 16)
-
-                    Rectangle()
-                        .fill(Color.black.opacity(0.1))
-                        .frame(height: 1)
-
-                    // Description field — scrollable, fills remaining space
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Description")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(descriptionLabel)
-
-                            TextField("", text: $typedNoteDescription, prompt: Text("Add a description...").foregroundStyle(descriptionLabel), axis: .vertical)
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(textColor)
-                                .lineLimit(3...)
-                                .focused($typedNoteDescriptionFocused)
-                                .submitLabel(.send)
-                                .onChange(of: typedNoteDescription) { _, newValue in
-                                    if newValue.contains("\n") {
-                                        typedNoteDescription = newValue.replacingOccurrences(of: "\n", with: "")
-                                        submitTypedNote()
-                                    }
+                // Card + spacer column — constrained to the area ABOVE the keyboard
+                VStack(spacing: 0) {
+                    // Card
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Heading field — always visible
+                        TextField("", text: $typedNoteText, prompt: Text("Heading").foregroundStyle(descriptionLabel), axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(textColor)
+                            .lineLimit(1...3)
+                            .focused($typedNoteFocused)
+                            .submitLabel(.next)
+                            .onChange(of: typedNoteText) { _, newValue in
+                                if newValue.contains("\n") {
+                                    typedNoteText = newValue.replacingOccurrences(of: "\n", with: "")
+                                    typedNoteDescriptionFocused = true
                                 }
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.top, 24)
+                            .padding(.bottom, 16)
+
+                        Rectangle()
+                            .fill(Color.black.opacity(0.1))
+                            .frame(height: 1)
+
+                        // Description section — compact when heading is focused,
+                        // expands to fill remaining space when description is focused.
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Description")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundStyle(descriptionLabel)
+
+                                TextField("", text: $typedNoteDescription, prompt: Text("Add a description...").foregroundStyle(descriptionLabel), axis: .vertical)
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundStyle(textColor)
+                                    .lineLimit(3...)
+                                    .focused($typedNoteDescriptionFocused)
+                                    .submitLabel(.send)
+                                    .onChange(of: typedNoteDescription) { _, newValue in
+                                        if newValue.contains("\n") {
+                                            typedNoteDescription = newValue.replacingOccurrences(of: "\n", with: "")
+                                            submitTypedNote()
+                                        }
+                                    }
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 22)
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 22)
+                        // Compact height when heading is focused; fills available space above
+                        // keyboard when description is focused.
+                        .frame(maxHeight: typedNoteDescriptionFocused ? .infinity : 120)
                     }
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 24))
+                    .shadow(color: .black.opacity(0.12), radius: 24, x: 0, y: 4)
+                    .padding(.horizontal, 24)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.85), value: typedNoteDescriptionFocused)
+
+                    // Spacer fills remaining height above the keyboard.
+                    // minLength ensures at least a small gap below the card.
+                    Spacer(minLength: 20)
                 }
-                .frame(maxHeight: typedNoteDescriptionFocused ? availableHeight : nil)
-                .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 24))
-                .shadow(color: .black.opacity(0.12), radius: 24, x: 0, y: 4)
-                .padding(.horizontal, 24)
-                .padding(.top, topPad)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: typedNoteDescriptionFocused)
-                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: keyboardHeight)
+                // Top padding gives breathing room below the status bar.
+                // Bottom padding equals the keyboard-aware safe area bottom inset — this constrains
+                // the VStack to the space above the keyboard without any manual tracking.
+                .padding(.top, 60)
+                .padding(.bottom, geo.safeAreaInsets.bottom)
             }
         }
-        .ignoresSafeArea()
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showTypedNoteModal)
     }
 
     private func submitTypedNote() {
@@ -2722,7 +2733,6 @@ struct HomeView: View {
                             .foregroundStyle(.white)
                             .opacity(showCloseButton ? 1 : 0)
                     }
-                    .clipped()
                     .frame(
                         width: showCloseButton ? 88 : nil,
                         height: showCloseButton ? 88 : 56
