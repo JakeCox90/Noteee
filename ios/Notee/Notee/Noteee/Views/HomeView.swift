@@ -347,6 +347,11 @@ struct HomeView: View {
     @State private var snackbarIsSuccess = false
     @State private var newItemIds: Set<UUID> = []
     @State private var keyboardHeight: CGFloat = 0
+    // Tracks the full rendered width of the mic button in its capsule state.
+    // Using an explicit numeric value for both animation states (capsule-width → 88)
+    // lets SwiftUI interpolate smoothly; animating from `nil` to 88 causes a
+    // width-snap because SwiftUI cannot interpolate a layout-flexible value.
+    @State private var micButtonWidth: CGFloat = 0
 
     private var highTasks: Binding<[TaskItem]> { $highTasks_ }
     private var mediumTasks: Binding<[TaskItem]> { $mediumTasks_ }
@@ -2368,88 +2373,86 @@ struct HomeView: View {
     // MARK: - Typed Note Modal
 
     private var typedNoteOverlay: some View {
-        // The scrim covers the full screen (ignores safe area).
-        // The card container uses GeometryReader to read safeAreaInsets.bottom, which on iOS 17+
-        // automatically includes the keyboard height — no manual NotificationCenter tracking needed.
-        // The card is top-aligned; a Spacer at the bottom is padded by the safe area inset,
-        // ensuring the card never overlaps the keyboard.
-        GeometryReader { geo in
-            ZStack(alignment: .top) {
-                // Scrim — full screen, sits behind the card
-                Color.black.opacity(0.08)
-                    .ignoresSafeArea()
-                    .onTapGesture { dismissTypedNote() }
+        // Overlays do NOT receive keyboard-aware safe area insets from GeometryReader.
+        // Instead, use keyboardHeight tracked via NotificationCenter (already wired up on the
+        // parent view) to push the card above the keyboard.
+        ZStack(alignment: .top) {
+            // Scrim — full screen, sits behind the card
+            Color.black.opacity(0.08)
+                .ignoresSafeArea()
+                .onTapGesture { dismissTypedNote() }
 
-                // Card + spacer column — constrained to the area ABOVE the keyboard
-                VStack(spacing: 0) {
-                    // Card
-                    VStack(alignment: .leading, spacing: 0) {
-                        // Heading field — always visible
-                        TextField("", text: $typedNoteText, prompt: Text("Heading").foregroundStyle(descriptionLabel), axis: .vertical)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(textColor)
-                            .lineLimit(1...3)
-                            .focused($typedNoteFocused)
-                            .submitLabel(.next)
-                            .onChange(of: typedNoteText) { _, newValue in
-                                if newValue.contains("\n") {
-                                    typedNoteText = newValue.replacingOccurrences(of: "\n", with: "")
-                                    typedNoteDescriptionFocused = true
-                                }
+            // Card + spacer column — constrained to the area ABOVE the keyboard
+            VStack(spacing: 0) {
+                // Card
+                VStack(alignment: .leading, spacing: 0) {
+                    // Heading field — always visible
+                    TextField("", text: $typedNoteText, prompt: Text("Heading").foregroundStyle(descriptionLabel), axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(textColor)
+                        .lineLimit(1...3)
+                        .focused($typedNoteFocused)
+                        .submitLabel(.next)
+                        .onChange(of: typedNoteText) { _, newValue in
+                            if newValue.contains("\n") {
+                                typedNoteText = newValue.replacingOccurrences(of: "\n", with: "")
+                                typedNoteDescriptionFocused = true
                             }
-                            .padding(.horizontal, 24)
-                            .padding(.top, 24)
-                            .padding(.bottom, 16)
-
-                        Rectangle()
-                            .fill(Color.black.opacity(0.1))
-                            .frame(height: 1)
-
-                        // Description section — compact when heading is focused,
-                        // expands to fill remaining space when description is focused.
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Description")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundStyle(descriptionLabel)
-
-                                TextField("", text: $typedNoteDescription, prompt: Text("Add a description...").foregroundStyle(descriptionLabel), axis: .vertical)
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundStyle(textColor)
-                                    .lineLimit(3...)
-                                    .focused($typedNoteDescriptionFocused)
-                                    .submitLabel(.send)
-                                    .onChange(of: typedNoteDescription) { _, newValue in
-                                        if newValue.contains("\n") {
-                                            typedNoteDescription = newValue.replacingOccurrences(of: "\n", with: "")
-                                            submitTypedNote()
-                                        }
-                                    }
-                            }
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 22)
                         }
-                        // Compact height when heading is focused; fills available space above
-                        // keyboard when description is focused.
-                        .frame(maxHeight: typedNoteDescriptionFocused ? .infinity : 120)
-                    }
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 24))
-                    .shadow(color: .black.opacity(0.12), radius: 24, x: 0, y: 4)
-                    .padding(.horizontal, 24)
-                    .animation(.spring(response: 0.35, dampingFraction: 0.85), value: typedNoteDescriptionFocused)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 24)
+                        .padding(.bottom, 16)
 
-                    // Spacer fills remaining height above the keyboard.
-                    // minLength ensures at least a small gap below the card.
-                    Spacer(minLength: 20)
+                    Rectangle()
+                        .fill(Color.black.opacity(0.1))
+                        .frame(height: 1)
+
+                    // Description section — compact when heading is focused,
+                    // expands to fill remaining space when description is focused.
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Description")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(descriptionLabel)
+
+                            TextField("", text: $typedNoteDescription, prompt: Text("Add a description...").foregroundStyle(descriptionLabel), axis: .vertical)
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(textColor)
+                                .lineLimit(3...)
+                                .focused($typedNoteDescriptionFocused)
+                                .submitLabel(.send)
+                                .onChange(of: typedNoteDescription) { _, newValue in
+                                    if newValue.contains("\n") {
+                                        typedNoteDescription = newValue.replacingOccurrences(of: "\n", with: "")
+                                        submitTypedNote()
+                                    }
+                                }
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 22)
+                    }
+                    // Compact height when heading is focused; fills available space above
+                    // the keyboard when description is focused.
+                    .frame(maxHeight: typedNoteDescriptionFocused ? .infinity : 120)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.85), value: typedNoteDescriptionFocused)
                 }
-                // Top padding gives breathing room below the status bar.
-                // Bottom padding equals the keyboard-aware safe area bottom inset — this constrains
-                // the VStack to the space above the keyboard without any manual tracking.
-                .padding(.top, 60)
-                .padding(.bottom, geo.safeAreaInsets.bottom)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 24))
+                .shadow(color: .black.opacity(0.12), radius: 24, x: 0, y: 4)
+                .padding(.horizontal, 24)
+
+                // Spacer fills remaining height above the keyboard.
+                // minLength ensures at least a small gap below the card.
+                Spacer(minLength: 20)
             }
+            // Top padding gives breathing room below the status bar.
+            // Bottom padding equals keyboardHeight so the VStack is constrained to the
+            // space above the keyboard — avoiding overlap entirely.
+            .padding(.top, 60)
+            .padding(.bottom, keyboardHeight > 0 ? keyboardHeight : 0)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: keyboardHeight)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: typedNoteDescriptionFocused)
         }
     }
 
@@ -2733,10 +2736,31 @@ struct HomeView: View {
                             .foregroundStyle(.white)
                             .opacity(showCloseButton ? 1 : 0)
                     }
+                    // Use an explicit numeric width in both states so SwiftUI can
+                    // interpolate smoothly during the spring animation. Animating
+                    // from `nil` (layout-flexible) to 88 causes an immediate width
+                    // snap because SwiftUI cannot interpolate a flexible value.
+                    // `micButtonWidth` is captured via a background GeometryReader
+                    // below and reflects the button's actual rendered width in the
+                    // capsule state. Falls back to nil on the very first layout pass
+                    // (before the reader fires) so the button still fills the HStack.
                     .frame(
-                        width: showCloseButton ? 88 : nil,
+                        width: showCloseButton ? 88 : (micButtonWidth > 0 ? micButtonWidth : nil),
                         height: showCloseButton ? 88 : 56
                     )
+                    .background {
+                        // Capture the button's rendered width while it's in the
+                        // capsule (non-recording) state. We only update when not
+                        // recording so the stored value always reflects the full
+                        // capsule width, not the animating-to-circle width.
+                        if !showCloseButton {
+                            GeometryReader { geo in
+                                Color.clear
+                                    .onAppear { micButtonWidth = geo.size.width }
+                                    .onChange(of: geo.size.width) { _, w in micButtonWidth = w }
+                            }
+                        }
+                    }
                     .background {
                         if showCloseButton {
                             Color(red: 0.319, green: 0.743, blue: 0.319)
