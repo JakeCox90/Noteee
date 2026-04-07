@@ -85,15 +85,19 @@ async function handleGet(req, res) {
       }),
     ]);
 
-    // Build project ID → name lookup
+    // Build project ID → { name, prefix } lookup
     const projectMap = {};
     for (const p of projectsRes.results) {
-      projectMap[p.id] = p.properties.Name?.title?.[0]?.plain_text || "";
+      projectMap[p.id] = {
+        name: p.properties.Name?.title?.[0]?.plain_text || "",
+        prefix: p.properties.Prefix?.rich_text?.[0]?.plain_text || "",
+      };
     }
 
     const actions = actionsRes.results.map((page) => {
       const props = page.properties;
       const projectRelation = props.Project?.relation?.[0]?.id;
+      const project = projectRelation ? projectMap[projectRelation] : null;
       return {
         id: page.id,
         title: props.Name?.title?.[0]?.plain_text || "",
@@ -101,7 +105,9 @@ async function handleGet(req, res) {
         priority: props.Priority?.select?.name || "medium",
         status: props.Status?.select?.name || "To Do",
         projectId: projectRelation || "",
-        projectName: projectRelation ? (projectMap[projectRelation] || "") : "",
+        projectName: project?.name || "",
+        projectPrefix: project?.prefix || "",
+        taskNumber: props["Task Number"]?.number || null,
         createdAt: page.created_time,
       };
     });

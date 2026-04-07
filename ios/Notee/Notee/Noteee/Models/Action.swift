@@ -23,5 +23,13 @@ struct NotionAction: Codable, Identifiable {
     let status: String
     let projectId: String?
     let projectName: String
+    let projectPrefix: String?
+    let taskNumber: Int?
     let createdAt: String
+
+    /// Human-readable task ID, e.g. "DJB-3"
+    var taskId: String? {
+        guard let prefix = projectPrefix, !prefix.isEmpty, let num = taskNumber else { return nil }
+        return "\(prefix)-\(num)"
+    }
 }

@@ -15,8 +15,9 @@ struct TaskItem: Identifiable {
     var projectId: String? = nil
     var isToday: Bool = false
     var createdAt: Date? = nil
+    var taskId: String? = nil
 
-    init(id: UUID = UUID(), notionId: String? = nil, title: String, isCompleted: Bool = false, description: String? = nil, priority: String = "Medium", projectName: String? = nil, projectId: String? = nil, isToday: Bool = false, createdAt: Date? = nil) {
+    init(id: UUID = UUID(), notionId: String? = nil, title: String, isCompleted: Bool = false, description: String? = nil, priority: String = "Medium", projectName: String? = nil, projectId: String? = nil, isToday: Bool = false, createdAt: Date? = nil, taskId: String? = nil) {
         self.id = id
         self.notionId = notionId
         self.title = title
@@ -27,6 +28,7 @@ struct TaskItem: Identifiable {
         self.projectId = projectId
         self.isToday = isToday
         self.createdAt = createdAt
+        self.taskId = taskId
     }
 }
 
@@ -293,7 +295,9 @@ struct HomeView: View {
     // Typed note modal (secondary text-input flow)
     @State private var showTypedNoteModal = false
     @State private var typedNoteText = ""
+    @State private var typedNoteDescription = ""
     @FocusState private var typedNoteFocused: Bool
+    @FocusState private var typedNoteDescriptionFocused: Bool
 
     // Project detail state — when set, the Today tab morphs into a color-themed
     // single-project view. `previousProjectFilter` preserves any filter the
@@ -342,6 +346,7 @@ struct HomeView: View {
     @State private var snackbarMessage = ""
     @State private var snackbarIsSuccess = false
     @State private var newItemIds: Set<UUID> = []
+    @State private var keyboardHeight: CGFloat = 0
 
     private var highTasks: Binding<[TaskItem]> { $highTasks_ }
     private var mediumTasks: Binding<[TaskItem]> { $mediumTasks_ }
@@ -556,6 +561,18 @@ struct HomeView: View {
                 showContent = true
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notif in
+            if let frame = notif.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    keyboardHeight = frame.height
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                keyboardHeight = 0
+            }
+        }
         .onChange(of: viewModel.state) { oldState, newState in
             if newState == .submitting && oldState == .clarification {
                 // Re-submitting after project pick — show processing snackbar
@@ -637,7 +654,8 @@ struct HomeView: View {
                     priority: action.priority.capitalized,
                     projectName: action.projectName.isEmpty ? nil : action.projectName,
                     projectId: (action.projectId ?? "").isEmpty ? nil : action.projectId,
-                    createdAt: isoFormatter.date(from: action.createdAt)
+                    createdAt: isoFormatter.date(from: action.createdAt),
+                    taskId: action.taskId
                 )
 
                 // Score for Today ranking:
@@ -1111,13 +1129,12 @@ struct HomeView: View {
 
                                 taskRow(tasks: tasks, index: originalIndex, isFirst: isFirst, isLast: isLast)
                                     .zIndex(reorderTaskId == tasks.wrappedValue[originalIndex].id ? 100 : 0)
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
                         .background(Color.white)
                         .clipShape(RoundedRectangle(cornerRadius: 24))
                         .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 4)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .transition(.opacity)
                     }
                 }
             }
@@ -2051,7 +2068,8 @@ struct HomeView: View {
             let safeArea = geo.safeAreaInsets
 
             let collapsedY = sourceFrame.minY - safeArea.top
-            let expandedY = (screenSize.height - 310) / 2
+            let availableHeight = screenSize.height - keyboardHeight
+            let expandedY = (availableHeight - 310) / 2
 
             ZStack(alignment: .top) {
                 // Light scrim
@@ -2127,6 +2145,13 @@ struct HomeView: View {
                                 .font(.system(size: 16, weight: .medium))
                                 .foregroundStyle(textColor)
                                 .lineLimit(3...5)
+                                .submitLabel(.done)
+                                .onChange(of: editingDescription) { _, newValue in
+                                    if newValue.contains("\n") {
+                                        editingDescription = newValue.replacingOccurrences(of: "\n", with: "")
+                                        collapseModal()
+                                    }
+                                }
                         }
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .padding(.horizontal, 24)
@@ -2218,6 +2243,22 @@ struct HomeView: View {
                         }
                         .padding(.horizontal, 24)
                         .padding(.vertical, 16)
+
+                        // Task ID label
+                        if let taskId = task.taskId {
+                            Rectangle()
+                                .fill(Color.black.opacity(0.1))
+                                .frame(height: 1)
+
+                            HStack {
+                                Text(taskId)
+                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(descriptionLabel)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 14)
+                        }
 
                         // Inline priority picker
                         VStack(spacing: 0) {
@@ -2315,6 +2356,7 @@ struct HomeView: View {
                 )
                 .padding(.horizontal, 24)
                 .offset(y: isModalExpanded ? expandedY : collapsedY)
+                .animation(.spring(response: 0.3, dampingFraction: 0.85), value: keyboardHeight)
                 .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showModalPriorityPicker)
                 .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showModalProjectPicker)
             }
@@ -2325,67 +2367,105 @@ struct HomeView: View {
     // MARK: - Typed Note Modal
 
     private var typedNoteOverlay: some View {
-        ZStack(alignment: .top) {
-            // Scrim — tap to dismiss
-            Color.black.opacity(0.08)
-                .ignoresSafeArea()
-                .onTapGesture { dismissTypedNote() }
+        GeometryReader { geo in
+            let safeArea = geo.safeAreaInsets
+            let topPad: CGFloat = typedNoteDescriptionFocused ? safeArea.top + 20 : 160
+            let bottomStop = keyboardHeight > 0 ? keyboardHeight : safeArea.bottom
+            let availableHeight = geo.size.height - topPad - bottomStop - 20
 
-            // Empty details card — mirrors taskModalOverlay styling
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 15) {
-                    // Empty checkbox placeholder to match task modal layout
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(checkboxBorder, lineWidth: 2)
-                        .frame(width: 16, height: 16)
+            ZStack(alignment: .top) {
+                // Scrim — tap to dismiss
+                Color.black.opacity(0.08)
+                    .ignoresSafeArea()
+                    .onTapGesture { dismissTypedNote() }
 
-                    TextField("", text: $typedNoteText, prompt: Text("Type your note…").foregroundStyle(descriptionLabel), axis: .vertical)
+                // Card with heading + description
+                VStack(alignment: .leading, spacing: 0) {
+                    // Heading field
+                    TextField("", text: $typedNoteText, prompt: Text("Heading").foregroundStyle(descriptionLabel), axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(textColor)
-                        .lineLimit(3...8)
+                        .lineLimit(1...3)
                         .focused($typedNoteFocused)
-                        .submitLabel(.send)
+                        .submitLabel(.next)
                         .onChange(of: typedNoteText) { _, newValue in
-                            // Vertical-axis TextField inserts \n on return instead of firing onSubmit.
                             if newValue.contains("\n") {
                                 typedNoteText = newValue.replacingOccurrences(of: "\n", with: "")
-                                submitTypedNote()
+                                typedNoteDescriptionFocused = true
                             }
                         }
+                        .padding(.horizontal, 24)
+                        .padding(.top, 24)
+                        .padding(.bottom, 16)
+
+                    Rectangle()
+                        .fill(Color.black.opacity(0.1))
+                        .frame(height: 1)
+
+                    // Description field — scrollable, fills remaining space
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Description")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(descriptionLabel)
+
+                            TextField("", text: $typedNoteDescription, prompt: Text("Add a description...").foregroundStyle(descriptionLabel), axis: .vertical)
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(textColor)
+                                .lineLimit(3...)
+                                .focused($typedNoteDescriptionFocused)
+                                .submitLabel(.send)
+                                .onChange(of: typedNoteDescription) { _, newValue in
+                                    if newValue.contains("\n") {
+                                        typedNoteDescription = newValue.replacingOccurrences(of: "\n", with: "")
+                                        submitTypedNote()
+                                    }
+                                }
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 22)
+                    }
                 }
+                .frame(maxHeight: typedNoteDescriptionFocused ? availableHeight : nil)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 24))
+                .shadow(color: .black.opacity(0.12), radius: 24, x: 0, y: 4)
                 .padding(.horizontal, 24)
-                .padding(.vertical, 24)
+                .padding(.top, topPad)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: typedNoteDescriptionFocused)
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: keyboardHeight)
             }
-            .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 24))
-            .shadow(color: .black.opacity(0.12), radius: 24, x: 0, y: 4)
-            .padding(.horizontal, 24)
-            .padding(.top, 160)
-            .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
-        .ignoresSafeArea(edges: .bottom)
+        .ignoresSafeArea()
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showTypedNoteModal)
     }
 
     private func submitTypedNote() {
-        let text = typedNoteText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
+        let heading = typedNoteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let description = typedNoteDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !heading.isEmpty else {
             dismissTypedNote()
             return
         }
         typedNoteFocused = false
-        viewModel.submitTypedNote(text)
+        typedNoteDescriptionFocused = false
+        let combined = description.isEmpty ? heading : "\(heading). \(description)"
+        viewModel.submitTypedNote(combined)
         showTypedNoteModal = false
         typedNoteText = ""
+        typedNoteDescription = ""
     }
 
     private func dismissTypedNote() {
         typedNoteFocused = false
+        typedNoteDescriptionFocused = false
         withAnimation(.easeOut(duration: 0.2)) {
             showTypedNoteModal = false
         }
         typedNoteText = ""
+        typedNoteDescription = ""
     }
 
     // MARK: - Filter Modals
@@ -2679,6 +2759,7 @@ struct HomeView: View {
                         Button {
                             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
                             typedNoteText = ""
+                            typedNoteDescription = ""
                             showTypedNoteModal = true
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                                 typedNoteFocused = true

@@ -121,9 +121,28 @@ function parseJSON(text) {
   return JSON.parse(clean);
 }
 
+// Get the highest Task Number for a given project
+async function getMaxTaskNumber(projectId) {
+  const response = await notion.databases.query({
+    database_id: ACTIONS_DB_ID,
+    filter: {
+      property: "Project",
+      relation: { contains: projectId },
+    },
+    sorts: [{ property: "Task Number", direction: "descending" }],
+    page_size: 1,
+  });
+
+  if (response.results.length === 0) return 0;
+  return response.results[0].properties["Task Number"]?.number || 0;
+}
+
 // Write inbox + actions in parallel, return actions with Notion IDs
 async function writeToNotion(transcription, result, projectId) {
   const actions = result.actions || [];
+
+  // Get the next task number for this project
+  const maxNumber = actions.length > 0 ? await getMaxTaskNumber(projectId) : 0;
 
   const inboxWrite = notion.pages.create({
     parent: { database_id: INBOX_DB_ID },
@@ -136,12 +155,13 @@ async function writeToNotion(transcription, result, projectId) {
     },
   });
 
-  const actionWrites = actions.map((action) => {
+  const actionWrites = actions.map((action, i) => {
     const properties = {
       Name: { title: [{ text: { content: action.title } }] },
       Project: { relation: [{ id: projectId }] },
       Priority: { select: { name: action.priority } },
       Status: { select: { name: "To Do" } },
+      "Task Number": { number: maxNumber + i + 1 },
     };
 
     // Fold grouped sub-steps into the Description as a bullet list so they
@@ -186,10 +206,11 @@ async function writeToNotion(transcription, result, projectId) {
 
   const [, ...actionPages] = await Promise.all([inboxWrite, ...actionWrites]);
 
-  // Return actions enriched with their Notion page IDs
+  // Return actions enriched with their Notion page IDs and task numbers
   return actions.map((action, i) => ({
     ...action,
     id: actionPages[i]?.id || null,
+    taskNumber: maxNumber + i + 1,
   }));
 }
 

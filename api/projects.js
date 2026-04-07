@@ -6,6 +6,22 @@ import { Client } from "@notionhq/client";
 const notion = new Client({ auth: process.env.NOTION_API_KEY });
 const PROJECTS_DB_ID = process.env.NOTION_PROJECTS_DB_ID;
 
+// Generate a 3-letter prefix from a project name, avoiding collisions
+function generatePrefix(name, existingPrefixes) {
+  const alpha = name.replace(/[^a-zA-Z]/g, "");
+  const base = alpha.slice(0, 3).toUpperCase().padEnd(3, "X");
+
+  if (!existingPrefixes.includes(base)) return base;
+
+  // Collision — try replacing last char with a digit
+  for (let i = 2; i <= 9; i++) {
+    const candidate = base.slice(0, 2) + i;
+    if (!existingPrefixes.includes(candidate)) return candidate;
+  }
+
+  return base;
+}
+
 // Fetch all active projects from Notion
 async function getProjects() {
   const response = await notion.databases.query({
@@ -17,6 +33,7 @@ async function getProjects() {
     id: page.id,
     name: page.properties.Name.title[0]?.plain_text || "",
     description: page.properties.Description?.rich_text[0]?.plain_text || "",
+    prefix: page.properties.Prefix?.rich_text[0]?.plain_text || "",
   }));
 }
 
@@ -69,6 +86,10 @@ export default async function handler(req, res) {
         });
       }
 
+      // Generate a unique 3-letter prefix
+      const existingPrefixes = existing.map((p) => p.prefix).filter(Boolean);
+      const prefix = generatePrefix(trimmedName, existingPrefixes);
+
       // Create the new project in Notion
       const page = await notion.pages.create({
         parent: { database_id: PROJECTS_DB_ID },
@@ -82,10 +103,13 @@ export default async function handler(req, res) {
           Status: {
             select: { name: "Active" },
           },
+          Prefix: {
+            rich_text: [{ text: { content: prefix } }],
+          },
         },
       });
 
-      return res.status(201).json({ id: page.id, name: trimmedName });
+      return res.status(201).json({ id: page.id, name: trimmedName, prefix });
     } catch (err) {
       console.error("Error creating project:", err);
       return res
