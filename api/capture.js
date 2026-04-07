@@ -39,11 +39,20 @@ Active projects:
 ${projectList}
 
 1. Match the note to the best project (>80% confidence) or ask for clarification.
-2. Extract concrete actions (verb-first, specific, one per item).
-3. Assign priority: high, medium, or low.
+2. Extract actions as OUTCOMES, not individual steps. Each action is a complete piece of work someone can pick up and finish. Fewer, bigger actions are better than many small ones.
+3. Use the "details" array for the steps/process needed to complete an action. These are NOT separate actions.
+4. Assign priority: high, medium, or low.
+
+GROUPING RULES — this is critical:
+- "Investigate and fix theming issues" = ONE action, with steps like "Check current theme values", "Compare against design spec", "Update color tokens" in details.
+- WRONG: separate actions for "Investigate theming issues" and "Fix theming issues". These are phases of the same work.
+- Ask: "Would one person do these together in one sitting?" If yes, it's one action with details.
+- A voice note about one topic should usually produce 1-3 actions, not 5-10.
 
 Confident match — return JSON:
-{"confident":true,"project_name":"...","actions":[{"title":"...","priority":"high|medium|low"}],"notes":"..."}
+{"confident":true,"project_name":"...","actions":[{"title":"...","priority":"high|medium|low","details":["step 1","step 2"]}],"notes":"..."}
+
+"details" is optional — omit or use [] when the action stands alone. Only include it when the note describes process or steps for that action.
 
 Not confident — return JSON:
 {"confident":false,"question":"...","options":["Project A","Project B"]}
@@ -70,10 +79,21 @@ async function extractActions(transcription, projectName) {
         role: "user",
         content: `Extract concrete actions from this voice note. The project is "${projectName}".
 
-Rules: verb-first, specific, one action per item. Assign priority: high, medium, or low.
+Rules:
+- Extract actions as OUTCOMES, not individual steps. Each action is a complete piece of work someone can pick up and finish. Fewer, bigger actions are better than many small ones.
+- Use the "details" array for the steps/process needed to complete an action. These are NOT separate actions.
+- Assign priority: high, medium, or low.
+
+GROUPING RULES — this is critical:
+- "Investigate and fix theming issues" = ONE action, with steps like "Check current theme values", "Compare against design spec", "Update color tokens" in details.
+- WRONG: separate actions for "Investigate theming issues" and "Fix theming issues". These are phases of the same work.
+- Ask: "Would one person do these together in one sitting?" If yes, it's one action with details.
+- A voice note about one topic should usually produce 1-3 actions, not 5-10.
 
 Return ONLY this JSON object, no other text:
-{"actions":[{"title":"...","priority":"high|medium|low"}],"notes":"..."}
+{"actions":[{"title":"...","priority":"high|medium|low","details":["step 1","step 2"]}],"notes":"..."}
+
+"details" is optional — omit or use [] when the action stands alone. Only include it when the note describes process or steps for that action.
 
 Voice note: "${transcription}"`,
       },
@@ -116,17 +136,53 @@ async function writeToNotion(transcription, result, projectId) {
     },
   });
 
-  const actionWrites = actions.map((action) =>
-    notion.pages.create({
+  const actionWrites = actions.map((action) => {
+    const properties = {
+      Name: { title: [{ text: { content: action.title } }] },
+      Project: { relation: [{ id: projectId }] },
+      Priority: { select: { name: action.priority } },
+      Status: { select: { name: "To Do" } },
+    };
+
+    // Fold grouped sub-steps into the Description as a bullet list so they
+    // ride along with the parent action instead of becoming their own tasks.
+    if (Array.isArray(action.details) && action.details.length > 0) {
+      const bulletList = action.details
+        .map((d) => `• ${String(d).trim()}`)
+        .filter((line) => line !== "• ")
+        .join("\n");
+      if (bulletList) {
+        properties.Description = {
+          rich_text: [{ text: { content: bulletList } }],
+        };
+      }
+    }
+
+    // Build page body content from details so the description appears
+    // when you open the card in Notion (board view).
+    const children = [];
+    if (Array.isArray(action.details) && action.details.length > 0) {
+      for (const detail of action.details) {
+        const text = String(detail).trim();
+        if (text) {
+          children.push({
+            object: "block",
+            type: "to_do",
+            to_do: {
+              rich_text: [{ type: "text", text: { content: text } }],
+              checked: false,
+            },
+          });
+        }
+      }
+    }
+
+    return notion.pages.create({
       parent: { database_id: ACTIONS_DB_ID },
-      properties: {
-        Name: { title: [{ text: { content: action.title } }] },
-        Project: { relation: [{ id: projectId }] },
-        Priority: { select: { name: action.priority } },
-        Status: { select: { name: "To Do" } },
-      },
-    })
-  );
+      properties,
+      ...(children.length > 0 ? { children } : {}),
+    });
+  });
 
   const [, ...actionPages] = await Promise.all([inboxWrite, ...actionWrites]);
 
